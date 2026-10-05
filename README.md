@@ -66,11 +66,3 @@ plots/          all generated figures
 ./src/visualize.py --input_path reduced/reduced.country --key '#코로나바이러스'
 ./src/alternative_reduce.py '#coronavirus' '#covid19' '#corona'
 ```
-
-## Skills demonstrated
-
-- Processing a terabyte-scale dataset that does not fit in memory, one shard at a time
-- Designing map and reduce steps that parallelize cleanly across hundreds of processes
-- Unix process control: `nohup`, `&`, and background jobs that outlive an SSH session
-- Parsing messy, multilingual JSON with missing fields
-- Communicating results with clear matplotlib figures
