@@ -1,56 +1,76 @@
 # Coronavirus Twitter Analysis (2020)
 
-A MapReduce-style analysis of every geotagged tweet sent in 2020 (~1.1 billion tweets, ~366 daily zip files) to track how coronavirus-related hashtags spread across languages, countries, and time.
+A MapReduce-style analysis of every geotagged tweet sent in 2020 — about 1.1 billion tweets across 366 daily archives — to track how coronavirus-related hashtags spread across languages, countries, and time.
 
-## What I built
+## Approach
 
-**Map (`src/map.py`)** — Processes one day of tweets. For each tweet it checks the text against a list of coronavirus-related hashtags and, for every match, increments two nested counters: one keyed by the tweet's language code (`lang`) and one keyed by the country it was sent from (`place.country_code`). Tweets with missing or malformed location data are handled gracefully rather than crashing the job. Each run writes a `.lang` and a `.country` JSON file to `outputs/`.
+The dataset is far too large to load into memory, so the work is split into independent per-day jobs that run in parallel and are combined afterward.
 
-**Parallel execution (`run_maps.sh`)** — Loops over all 2020 data files and launches one `map.py` process per day using `nohup` and `&`, so all ~366 jobs run concurrently on the server and keep running after I disconnect.
-
-**Reduce (`src/reduce.py`)** — Merges the hundreds of daily output files into a single yearly total by element-wise addition of the nested counters, producing `reduced.lang` and `reduced.country`.
-
-**Visualize (`src/visualize.py`)** — Reads a reduced file, pulls the counts for a given hashtag, and plots the top 10 keys as a sorted bar chart saved to PNG.
-
-**Alternative reduce (`src/alternative_reduce.py`)** — Takes a list of hashtags on the command line, scans the daily `outputs/` files directly, and plots daily tweet volume for each hashtag over the course of the year as one line per hashtag.
+| Step | File | What it does |
+|---|---|---|
+| **Map** | `src/map.py` | Reads one day of tweets. For each tweet matching a tracked hashtag, increments two nested counters: one keyed by language (`lang`) and one by country (`place.country_code`). Handles tweets with missing location data without failing. Writes a `.lang` and a `.country` file to `outputs/`. |
+| **Run** | `run_maps.sh` | Launches one `map.py` process per day of 2020 with `nohup` and `&`, so all 366 jobs run concurrently and keep running after the SSH session closes. |
+| **Reduce** | `src/reduce.py` | Element-wise sums the 366 daily counters into yearly totals: `reduced/reduced.lang` and `reduced/reduced.country`. |
+| **Visualize** | `src/visualize.py` | Plots the top 10 languages or countries for a given hashtag as a sorted bar chart. |
+| **Time series** | `src/alternative_reduce.py` | Takes any list of hashtags, scans the daily outputs directly, and plots tweets per day over the year, one line per hashtag. |
 
 ## Results
 
-### `#coronavirus` by language
+### `#coronavirus` — top languages and countries
 
-![#coronavirus by language](reduced.lang.coronavirus.png)
+![#coronavirus by language](plots/coronavirus_by_language.png)
 
-### `#coronavirus` by country
+![#coronavirus by country](plots/coronavirus_by_country.png)
 
-![#coronavirus by country](reduced.country.coronavirus.png)
+### `#코로나바이러스` (Korean: "coronavirus") — top languages and countries
 
-### `#코로나바이러스` (Korean for "coronavirus") by language
+![#코로나바이러스 by language](plots/korean_coronavirus_by_language.png)
 
-![#코로나바이러스 by language](reduced.lang.%EC%BD%94%EB%A1%9C%EB%82%98%EB%B0%94%EC%9D%B4%EB%9F%AC%EC%8A%A4.png)
+![#코로나바이러스 by country](plots/korean_coronavirus_by_country.png)
 
-### `#코로나바이러스` by country
+### Daily hashtag volume over 2020
 
-![#코로나바이러스 by country](reduced.country.%EC%BD%94%EB%A1%9C%EB%82%98%EB%B0%94%EC%9D%B4%EB%9F%AC%EC%8A%A4.png)
+Daily tweet counts for `#coronavirus`, `#covid19`, and `#corona`.
 
-### Hashtag usage over the year
+![Daily hashtag usage over 2020](plots/hashtag_usage_over_2020.png)
 
-Daily tweet counts for `#coronavirus`, `#covid19`, and `#corona`, produced by `src/alternative_reduce.py`.
+What the plot shows:
 
-![Daily hashtag usage over 2020](alternative_reduce.png)
+- **`#coronavirus`** has a small first bump around day 30 (late January, WHO global health emergency), then surges to ~15,000 tweets/day around day 72 — the week the WHO declared a pandemic (March 11).
+- **`#covid19`** is essentially absent until day ~42, when the WHO named the disease. It overtakes `#coronavirus` by day ~80 and stays dominant for the rest of the year at 1,500–2,500 tweets/day, while `#coronavirus` fades to a few hundred.
+- **`#corona`** peaks near 4,000 tweets/day around day 70 and declines steadily.
+- A sharp one-day spike in `#covid19` near day 276 (early October) coincides with the announcement that the U.S. president had tested positive.
 
-A few things stand out:
+Matching is by substring, so a tweet tagged `#coronavirus` is also counted under `#corona`.
 
-- `#coronavirus` shows a small first bump around day 30 (late January, when the WHO declared a global health emergency), then explodes to a peak of roughly 15,000 tweets/day around day 72 — the week the WHO declared a pandemic (March 11).
-- `#covid19` is essentially absent until day ~42, when the WHO officially named the disease. It overtakes `#coronavirus` by day ~80 and stays the dominant tag for the rest of the year at 1,500–2,500 tweets/day, while `#coronavirus` fades to a few hundred.
-- `#corona` peaks near 4,000 tweets/day around day 70 and then declines steadily.
-- There is a sharp one-day spike in `#covid19` near day 276 (early October), coinciding with the announcement that the U.S. president had tested positive.
+## Repository layout
 
-The hashtag counts come from text matching, so `#coronavirus` tweets are also counted under `#corona`.
+```
+src/            map.py, reduce.py, visualize.py, alternative_reduce.py
+run_maps.sh     launches one map.py job per day of 2020 in parallel
+hashtags        the hashtags tracked by the mapper
+outputs/        per-day mapper output (.lang / .country), all 366 days
+reduced/        yearly totals after the reduce step
+plots/          all generated figures
+```
+
+## Reproducing the results
+
+```sh
+./run_maps.sh
+./src/reduce.py --input_paths outputs/*.lang    --output_path reduced/reduced.lang
+./src/reduce.py --input_paths outputs/*.country --output_path reduced/reduced.country
+./src/visualize.py --input_path reduced/reduced.lang    --key '#coronavirus'
+./src/visualize.py --input_path reduced/reduced.country --key '#coronavirus'
+./src/visualize.py --input_path reduced/reduced.lang    --key '#코로나바이러스'
+./src/visualize.py --input_path reduced/reduced.country --key '#코로나바이러스'
+./src/alternative_reduce.py '#coronavirus' '#covid19' '#corona'
+```
 
 ## Skills demonstrated
 
 - Processing a terabyte-scale dataset that does not fit in memory, one shard at a time
-- Designing map and reduce steps so the work parallelizes cleanly across hundreds of processes
-- Unix process control: `nohup`, `&`, background jobs that outlive an SSH session
-- Handling messy, multilingual JSON with missing fields
-- Producing readable plots with matplotlib
+- Designing map and reduce steps that parallelize cleanly across hundreds of processes
+- Unix process control: `nohup`, `&`, and background jobs that outlive an SSH session
+- Parsing messy, multilingual JSON with missing fields
+- Communicating results with clear matplotlib figures
